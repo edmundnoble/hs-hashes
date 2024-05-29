@@ -13,7 +13,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-#include <openssl/opensslv.h>
 
 -- |
 -- Module: Data.Hash.Internal.OpenSSL
@@ -121,10 +120,6 @@ import Data.Hash.Internal.Utils
 -- - OpenSSL 3.0: Support ends 2026-09-07 (LTS).
 -- - OpenSSL 3.1: Support ends 2025-03-14.
 -- - OpenSSL 3.2: Native Keccak support added.
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-#error "Unsupported OpenSSL version. Please install OpenSSL >= 1.1.0"
-#endif
 
 -- -------------------------------------------------------------------------- --
 --
@@ -235,7 +230,7 @@ foreign import ccall unsafe "openssl/evp.h EVP_MD_CTX_new"
 foreign import ccall unsafe "openssl/evp.h &EVP_MD_CTX_free"
     c_evp_ctx_free_ptr :: FunPtr (Ptr a -> IO ())
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if 1
 foreign import ccall unsafe "openssl/evp.h EVP_DigestInit_ex2"
 #else
 foreign import ccall unsafe "openssl/evp.h EVP_DigestInit_ex"
@@ -248,14 +243,14 @@ foreign import ccall unsafe "openssl/evp.h EVP_DigestUpdate"
 foreign import ccall unsafe "openssl/evp.h EVP_DigestFinal_ex"
     c_evp_digest_final :: Ptr ctx -> Ptr d -> Ptr Int -> IO Bool
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if 1
 foreign import ccall unsafe "openssl/evp.h EVP_MD_CTX_get0_md"
 #else
 foreign import ccall unsafe "openssl/evp.h EVP_MD_CTX_md"
 #endif
     c_evp_md_ctx_get0_md :: Ptr ctx -> Ptr a
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if 1
 foreign import ccall unsafe "openssl/evp.h EVP_MD_get_size"
 #else
 foreign import ccall unsafe "openssl/evp.h EVP_MD_size"
@@ -357,44 +352,6 @@ instance KnownNat n => IncrementalHash (XOF_Digest n a) where
     finalize = xof_finalCtx
     {-# INLINE update #-}
     {-# INLINE finalize #-}
-
-#if OPENSSL_VERSION_NUMBER < 0x30200000L
--- -------------------------------------------------------------------------- --
--- Legacy Keccak Implementation
-
-newtype LegacyKeccak_Digest a = LegacyKeccak_Digest BS.ShortByteString
-    deriving (Eq, Ord)
-    deriving (IncrementalHash) via (Digest a)
-    deriving (Show, IsString) via B16ShortByteString
-
-foreign import ccall unsafe "keccak.h keccak_EVP_DigestInit_ex"
-    c_keccak_EVP_DigestInit_ex :: Ptr ctx -> Ptr a -> IO Bool
-
-legacyKeccak_initCtx :: Algorithm a -> IO (Ctx a)
-legacyKeccak_initCtx (Algorithm alg) = do
-    c@(Ctx ctx) <- newCtx
-    r <- withForeignPtr ctx $ \ctxPtr ->
-        withForeignPtr alg $ \algPtr ->
-            c_keccak_EVP_DigestInit_ex ctxPtr algPtr
-    unless r $ throw $ OpenSslException "digest initialization failed"
-    return c
-{-# INLINE legacyKeccak_initCtx #-}
-
-legacyKeccak_resetCtx :: Ctx a -> IO ()
-legacyKeccak_resetCtx (Ctx ctx) = do
-    r <- withForeignPtr ctx $ \ptr ->
-        c_keccak_EVP_DigestInit_ex ptr nullPtr
-    unless r $ throw $ OpenSslException "digest re-initialization failed"
-{-# INLINE legacyKeccak_resetCtx #-}
-
-instance OpenSslDigest a => Hash (LegacyKeccak_Digest a) where
-    initialize = legacyKeccak_initCtx (algorithm @a)
-    {-# INLINE initialize #-}
-
-instance ResetableHash (LegacyKeccak_Digest a) where
-    reset = legacyKeccak_resetCtx
-    {-# INLINE reset #-}
-#endif
 
 -- -------------------------------------------------------------------------- --
 -- Concrete Digests
@@ -585,7 +542,7 @@ type Shake256_512 = Shake256 64
 -- For details see the file cbits/keccak.c.
 #endif
 
-#if OPENSSL_VERSION_NUMBER >= 0x30200000L
+#if 1
 #define KECCAK(x) ("KECCAK-" <> show @Int x)
 #define KECCAK_DIGEST Digest
 #else
@@ -695,4 +652,3 @@ newtype Blake2s256 = Blake2s256 BS.ShortByteString
     deriving (Show, IsString) via B16ShortByteString
     deriving (IncrementalHash, Hash) via (Digest Blake2s256)
 instance OpenSslDigest Blake2s256 where algorithm = blake2s256
-
